@@ -1,27 +1,35 @@
 """
 Stage 2 of the pipeline: splitting documents into chunks.
 
-⚠️ THIS IS THE FILE YOU CHANGE IN MILESTONE 3.
+`split_documents` cuts one chunk per reply and prefixes every chunk with the
+thread's question line. `fallback_split` below it is the starter's original
+fixed-window chunker, kept for comparison — Milestone 3's stop rule points back
+at it, and unit 2 wants a baseline to measure against.
 
-`split_documents` below is deliberately plain. It cuts every document into
-fixed-size pieces with a fixed overlap and pays no attention to where sentences
-or paragraphs end. It works, and it is not good.
+Why per reply, for `advice_threads`:
 
-On a corpus of short posts it may not cut anything at all: `campus_life` comes
-out as 88 documents and 88 chunks, because almost nothing in it reaches 800
-characters. That is the baseline, not a bug — Milestone 3 is where you decide
-whether one post should stay one chunk.
+Every document here is one thread — a `THREAD:` question followed by two to
+five replies that argue with each other. The reply is the unit of meaning: one
+person's take, start to finish. The fixed-window chunker ignores that
+completely. On this corpus it produced 26 chunks from 23 documents, which
+means it mostly left whole threads intact and then, on the few documents that
+overran 800 characters, cut them at an arbitrary character — once leaving a
+2-character chunk that is the tail of a sentence and matches nothing.
 
-Your job in Milestone 3 is to replace the *body* of `split_documents` with a
-strategy that fits the documents you actually read in Milestone 1. Keep the
-name and the shape of what it returns — the rest of the pipeline calls it, and
-your README has to name the function that produced your chunks.
+Both of those are wrong in the same way. A whole thread is four disagreeing
+answers embedded as one vector, so it matches every question about that topic
+a little and none of them well. An arbitrary slice is worse.
 
-If you get stuck for 30 minutes, `fallback_split` is the original. Switch back
-to it, write down what you saw, and move on. That's a real observation about
-your pipeline, not giving up.
+The cost of splitting per reply is context. Reply 3 of thread_bike_commute.txt
+reads "Both true. I keep a cheap bike for September to November and walk the
+rest of the year." Alone, that answers nothing — you cannot tell what is both
+true. So every chunk carries the thread question with it. That repeated
+question line is this chunker's version of overlap: neighbouring chunks share
+context, but the shared context is the thing that makes the reply legible
+rather than an arbitrary tail of the previous window.
 """
 
+import re
 from dataclasses import dataclass
 
 import config
@@ -40,6 +48,13 @@ class Chunk:
     @property
     def label(self) -> str:
         return f"{self.source}#{self.index}"
+
+
+# "--- reply 2 (21 votes) ---" — the boundary every document in this corpus uses.
+REPLY_MARKER = re.compile(r"^---\s*reply\s+\d+\s*\(\d+\s+votes\)\s*---\s*$", re.M)
+
+# The thread's question, always the first line.
+TITLE_LINE = re.compile(r"^THREAD:.*$", re.M)
 
 
 def fallback_split(
@@ -80,24 +95,70 @@ def fallback_split(
     return chunks
 
 
+def _split_oversized(body: str, budget: int) -> list[str]:
+    """
+    Last resort for a reply too long to fit the chunk ceiling with its title.
+
+    No reply in `advice_threads` reaches this — the longest is 195 characters
+    and the budget is comfortably above that. It exists so the length bound in
+    criterion 4 holds by construction rather than by luck, and so the chunker
+    does not silently break on a corpus with longer replies.
+    """
+    overlap = min(config.CHUNK_OVERLAP, budget // 4)
+    pieces: list[str] = []
+    start = 0
+    while start < len(body):
+        piece = body[start : start + budget].strip()
+        if piece:
+            pieces.append(piece)
+        start += budget - overlap
+    return pieces
+
+
 def split_documents(documents: list[Document]) -> list[Chunk]:
     """
-    Split documents into chunks. ⚠️ REPLACE THE BODY OF THIS IN MILESTONE 3.
+    One chunk per reply, each carrying its thread's question line.
 
-    Right now it just calls the fallback. That is the plain, generic behaviour
-    the brief is talking about.
-
-    When you write your own strategy, set `produced_by` to
-    "chunker.py::split_documents" so your README's Sample Chunks section names
-    the right function. `app.py chunks` prints that string for you.
-
-    Things worth thinking about before you write any code:
-      - Are your documents short posts or long guides?
-      - Is the useful information in one sentence, or spread over a paragraph?
-      - Would splitting on paragraph breaks keep more thoughts intact than
-        splitting on a character count?
+    Falls back to `fallback_split` for any document that does not look like a
+    thread, so bringing in documents with a different shape degrades instead of
+    crashing.
     """
-    return fallback_split(documents)
+    chunks: list[Chunk] = []
+    unstructured: list[Document] = []
+
+    for doc in documents:
+        title_match = TITLE_LINE.search(doc.text)
+        replies = REPLY_MARKER.split(doc.text)
+
+        # parts[0] is everything before the first reply — the title line.
+        # Anything without both a title and at least one reply is not a thread.
+        if not title_match or len(replies) < 2:
+            unstructured.append(doc)
+            continue
+
+        title = title_match.group(0).strip()
+        budget = config.MAX_CHUNK_CHARS - len(title) - 2
+
+        index = 0
+        for reply in replies[1:]:
+            body = reply.strip()
+            if not body:
+                continue
+            for piece in _split_oversized(body, budget):
+                chunks.append(
+                    Chunk(
+                        text=f"{title}\n\n{piece}",
+                        source=doc.source,
+                        index=index,
+                        produced_by="chunker.py::split_documents",
+                    )
+                )
+                index += 1
+
+    if unstructured:
+        chunks.extend(fallback_split(unstructured))
+
+    return chunks
 
 
 def describe(chunks: list[Chunk]) -> str:

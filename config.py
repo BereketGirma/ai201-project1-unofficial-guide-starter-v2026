@@ -27,8 +27,16 @@ CORPUS = os.getenv("AI201_CORPUS", "advice_threads")
 # These are deliberately plain, generic numbers. Milestone 3 is where you
 # replace them with numbers that fit the documents you actually read.
 
+# Used by chunker.py::fallback_split, the starter's original fixed-window
+# chunker. Kept as the baseline to compare against in unit 2.
 CHUNK_SIZE = 800        # characters per chunk
 CHUNK_OVERLAP = 120     # characters shared between neighbouring chunks
+
+# Used by chunker.py::split_documents, the per-reply chunker.
+# One chunk = one reply, prefixed with its thread's THREAD: question line.
+# There is no sliding-window overlap; the repeated question line is the shared
+# context instead. This ceiling is the upper bound named in criterion 4.
+MAX_CHUNK_CHARS = 400
 
 
 # ─── Retrieval (Milestone 4) ─────────────────────────────────────────────────
@@ -43,7 +51,15 @@ TOP_K = 5               # how many chunks to pull back per question
 # 0.6 is a reasonable starting point, not a right answer. Milestone 4 has you
 # measure your own two groups of distances and put the cutoff in the gap.
 # Most corpora land somewhere between 0.45 and 0.75.
-THRESHOLD = 0.6
+#
+# Measured on advice_threads with the per-reply chunker:
+#   in corpus     0.129  0.202  0.310  0.443  0.589
+#   out of scope  0.819  0.861  0.898  0.899  0.905
+# A gap of 0.230 with nothing in it. 0.70 is near the midpoint (0.704): it
+# leaves the worst real question 0.111 of margin and the nearest out-of-scope
+# question 0.119. The shipped 0.6 would have cleared Q4 by 0.011, which is not
+# margin, it is luck.
+THRESHOLD = 0.70
 
 
 # ─── Models ──────────────────────────────────────────────────────────────────
