@@ -15,6 +15,9 @@ pipeline earns credit; *"80% seemed reasonable"* does not.
 > Missing your own targets next unit costs you nothing. Setting a target so
 > easy you can't miss it does.
 
+Corpus: `advice_threads` — 23 question-and-answer threads, 75 replies, replies
+that disagree with each other as often as not.
+
 ---
 
 ## 1. Retrieved chunks contain the answer
@@ -23,8 +26,15 @@ For at least 4 of my 5 test questions, the retrieved chunks include one that
 contains the answer.
 
 **Why this target:**
-<!-- e.g. "One of my questions is about a topic only two documents mention, so
-     I expect that one to be hard." -->
+Four of five and not five of five because Q4 ("the most reliable way to get an
+extension") is the one I expect to lose. Its answer is in reply 2 of
+`thread_late_work.txt`, but that thread's title asks a different question —
+"what actually happens if you hand something in late?" — so the chunk's
+embedding is pulled toward consequences rather than toward asking early. It
+already comes back furthest of my five, and it is the question most likely to
+drop out when I re-chunk. The other four sit in threads whose title and answer
+point the same way, so if any of those miss, something is broken rather than
+merely hard.
 
 ---
 
@@ -33,8 +43,12 @@ contains the answer.
 Every answer the system produces names at least one source document.
 
 **Why this target:**
-<!-- Why all five and not four? What about your setup makes that achievable —
-     or what would have to go wrong for it not to be? -->
+All five and not four because nothing about this one is left to chance.
+`generate.py` appends the source line from the retrieved chunks' metadata, and
+the relevance gate means the model is never called with an empty context in
+the first place — a question with no close chunk is refused before generation.
+So the only way to land under 5 of 5 is a real defect in how sources are
+carried through, and I would rather find that than excuse it.
 
 ---
 
@@ -50,48 +64,70 @@ in at least 4 of 5 tries.
      just keep five of them, or the "4 of 5" above has nothing to be 4 of. -->
 
 **Why this target:**
-<!-- What did your distances look like when you set the cutoff in Milestone 4?
-     Was there a clean gap, or did the two groups overlap? -->
+The two groups separated cleanly when I measured them. My five in-corpus
+questions came back at 0.180, 0.330, 0.391, 0.405 and 0.591; the five
+`OUT_OF_SCOPE` questions at 0.787, 0.828, 0.871, 0.890 and 0.930. That is a gap
+of roughly 0.2 with nothing sitting in it, which is wide enough that I would
+expect 5 of 5 today. I am still writing 4 of 5, because those numbers were
+measured against the starter's whole-thread chunks, and Milestone 3 replaces
+the chunker. Shorter chunks carry less text, and a chunk about bikes or laundry
+may well end up closer to an unrelated question than a whole thread was. I do
+not yet know which direction the gap moves, so I am leaving one slot for it to
+narrow.
 
 ---
 
-## 4. Something about your chunks
+## 4. Chunks are self-contained and none is a fragment
 
-<!-- YOU WRITE THIS ONE.
-
-     How would you know if your chunks were the right size? Name something
-     countable or observable.
-
-     Examples of the right shape — don't copy these, they should come from
-     what you actually saw in Milestone 3:
-       - "At least 4 of 5 sampled chunks read as a complete thought, with no
-          sentence cut in half at either end."
-       - "No chunk is shorter than 200 characters, since anything below that
-          in my corpus turned out to be a heading with no content under it." -->
-
-
+Every chunk is between 80 and 400 characters long, and every chunk contains the
+`THREAD:` question line from the document it came from. I check this by
+scripting it over the full set of chunks, not by eye — both halves are
+mechanical, so the answer is the same whoever runs it.
 
 **Why this target:**
+Both halves come from something I saw in the documents. The lower bound exists
+because the starter chunker produces a 2-character chunk on this corpus — the
+tail of a thread that did not divide evenly into 800-character windows. The
+shortest actual reply in the corpus is 68 characters, and once a thread title
+is prefixed the shortest possible real chunk is around 120, so an 80-character
+floor cannot be satisfied by a fragment but does not force me to glue unrelated
+replies together to clear it. The upper bound is 400 because the longest reply
+is 195 characters and the longest title around 70; anything much past 400 means
+I have merged replies that disagree with each other into one chunk, which is
+the specific failure this corpus invites.
 
-
+The `THREAD:` requirement is the half I actually care about. Splitting per
+reply is the obvious move here, and it has an obvious cost: reply 3 of
+`thread_bike_commute.txt` reads "Both true. I keep a cheap bike for September
+to November and walk the rest of the year." On its own that answers nothing —
+you cannot tell what is both true, or what the bike is being compared against.
+Carrying the thread question into every chunk is what stops per-reply chunking
+from producing text that retrieves well and means nothing. I chose a mechanical
+test over "does this read as a complete thought" on purpose, because I do not
+trust myself to judge that the same way twice.
 
 ---
 
-## 5. Your choice
+## 5. In-corpus questions are not refused
 
-<!-- YOU WRITE THIS ONE TOO.
-
-     Pick something you actually care about getting right. It could be about
-     speed, about refusals, about a particular kind of question your corpus
-     handles badly, about source attribution being correct rather than merely
-     present — anything, as long as it names a number or an observable
-     outcome. -->
-
-
+All 5 of my test questions pass the relevance gate. None of them is refused,
+measured at whatever cutoff I settle on in Milestone 4.
 
 **Why this target:**
+This is the criterion that stops me from gaming criterion 3. Refusals are easy
+to get right if you refuse everything, and criterion 3 on its own rewards
+pushing the cutoff down. Q4 is why that is not free: it came back at 0.591
+against the shipped cutoff of 0.6, so a real question with a real answer in the
+documents clears the gate by nine thousandths. Drop the cutoff to 0.55 to make
+refusals look decisive and I silently start refusing a question I can answer —
+and a wrong refusal is worse than a wrong answer here, because it looks like
+honesty.
 
-
+Five of five and not four because the gap I measured is wide enough to hold
+both targets at once: putting the cutoff near 0.70 leaves every in-corpus
+question roughly 0.11 of margin and every out-of-scope question roughly 0.09 on
+the other side. If I cannot hit 5 of 5 and 4 of 5 together, that tells me the
+gap closed when I re-chunked, and that is exactly the thing I want to find out.
 
 ---
 

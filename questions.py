@@ -21,13 +21,36 @@ Swap them for your own if you like. Keep five of them either way: criterion 3
 names a target of "4 of 5", and four of three is not a thing.
 """
 
+# Five questions about advice_threads, ordered roughly easiest to hardest.
+#
+# Q1-Q2 have their answer sitting in a single reply, stated as a number.
+# Q3's answer is conditional and buried mid-sentence in one reply.
+# Q4's answer is a norm rather than a number, and the reply that carries it
+#   is not the top-voted reply in the thread.
+# Q5 is the hard one on purpose: the four replies in thread_bike_commute.txt
+#   disagree with each other, so a correct answer has to pick up the winter
+#   objection rather than just the first enthusiastic reply.
 QUESTIONS = [
-    # {"question": "...", "expects": "..."},
-    {"question": "", "expects": ""},
-    {"question": "", "expects": ""},
-    {"question": "", "expects": ""},
-    {"question": "", "expects": ""},
-    {"question": "", "expects": ""},
+    {
+        "question": "How many black-and-white pages does the printing quota cover?",
+        "expects": "600",
+    },
+    {
+        "question": "How much RAM do students say is worth paying for on a laptop for CS courses?",
+        "expects": "16GB",
+    },
+    {
+        "question": "If a syllabus doesn't state an email response window, how long should I wait before following up with a professor?",
+        "expects": "48 hours",
+    },
+    {
+        "question": "What is the most reliable way to get an extension on a late assignment?",
+        "expects": "before the deadline",
+    },
+    {
+        "question": "Do students recommend keeping a bike through the winter here?",
+        "expects": "salt",
+    },
 ]
 
 # Questions from a different world entirely. Your gate should refuse all five.
