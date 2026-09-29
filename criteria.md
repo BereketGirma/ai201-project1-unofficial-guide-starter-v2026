@@ -36,6 +36,28 @@ drop out when I re-chunk. The other four sit in threads whose title and answer
 point the same way, so if any of those miss, something is broken rather than
 merely hard.
 
+> **Revised in unit 2:** For at least 4 of my 5 test questions, the retrieved
+> chunks include one that contains the answer **and comes from the document
+> that actually holds it** (`answer_in` in `questions.py`).
+>
+> **Why revised:** The original could be satisfied by the wrong document, so it
+> was not measuring what I meant. Q4 expects the phrase "before the deadline".
+> That phrase appears in `thread_late_work.txt` — reply 2, "the universal rule:
+> ask before the deadline, not after" — which is the answer. It also appears in
+> `thread_group_project.txt` — reply 2, "most instructors here will adjust
+> individual grades if you raise it before the deadline rather than after" —
+> which is a different claim about group-project grading and answers nothing
+> about extensions. When I measured criterion 1, the `group_project` chunk
+> ranked second and the `late_work` chunk ranked fourth, so my check credited
+> the hit to the wrong document and called it a pass. It was right by accident.
+>
+> This is a fix to the measurement, not to the target. The number stays at 4 of
+> 5, and on the before-run the revised criterion comes out 5 of 5 exactly as the
+> original did — `thread_late_work.txt#1` is in the top five, just badly ranked.
+> So the verdict does not change. What changes is that the criterion can no
+> longer pass for the wrong reason, which matters because the badly-ranked
+> `late_work` chunk is the thing my improvement is trying to move.
+
 ---
 
 ## 2. Every answer names a source
