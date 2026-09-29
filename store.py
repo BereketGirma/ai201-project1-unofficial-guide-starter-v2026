@@ -18,6 +18,7 @@ rest of the project if they were wrong:
 """
 
 import os
+import re
 import shutil
 from dataclasses import dataclass
 
@@ -42,6 +43,13 @@ class Result:
     label: str
     distance: float   # LOWER IS BETTER. 0.3 is close, 0.9 is unrelated.
     produced_by: str
+
+    # Filled in by hybrid retrieval, left as None by the semantic-only path.
+    # These exist so a run log can show *why* a chunk ranked where it did,
+    # which is the whole point of the unit 2 improvement.
+    semantic_rank: int | None = None
+    keyword_rank: int | None = None
+    fused_score: float | None = None
 
 
 _model = None
@@ -178,18 +186,60 @@ def build_index(
     return len(chunks)
 
 
+def _tokenize(text: str) -> list[str]:
+    """
+    Words, lowercased, for BM25.
+
+    The `THREAD:` prefix is deliberately left in. It carries the word "late" for
+    `thread_late_work.txt`, and "late" is the only term Q4's question shares with
+    its answer chunk at all — stripping the prefix would throw away the one piece
+    of lexical overlap hybrid search has to work with here.
+    """
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
+def _rrf(rankings: list[dict[str, int]], k: int) -> dict[str, float]:
+    """
+    Reciprocal rank fusion: score = sum(1 / (k + rank)) over each ranking.
+
+    Fusing ranks rather than scores is what makes this safe. A cosine distance
+    and a BM25 score are on unrelated scales with no shared zero, so adding or
+    averaging them directly would let whichever happens to have the larger
+    numeric range quietly dominate. Ranks have no units.
+    """
+    scores: dict[str, float] = {}
+    for ranking in rankings:
+        for label, rank in ranking.items():
+            scores[label] = scores.get(label, 0.0) + 1.0 / (k + rank)
+    return scores
+
+
 def search(
     question: str,
     top_k: int | None = None,
     corpus: str | None = None,
     variant: str = "default",
+    hybrid: bool | None = None,
 ) -> list[Result]:
     """
     Retrieve the chunks closest in meaning to a question.
 
-    Returns them nearest-first, each with its distance.
+    Returns them best-first, each with its distance.
+
+    With `hybrid` on (the unit 2 improvement, `config.HYBRID_SEARCH`), the order
+    is reciprocal rank fusion of the semantic ranking and a BM25 keyword
+    ranking. With it off, the order is semantic distance alone — which is what
+    the before-run measured.
+
+    One thing worth being explicit about, because it decides whether the
+    relevance gate still means anything: `distance` on every returned Result is
+    always the true cosine distance from the question, in both modes. Hybrid
+    changes which chunks come back and in what order, never what a distance
+    says. `gate.check` takes the minimum distance over the returned chunks, so
+    the gate continues to compare like with like.
     """
     top_k = top_k or config.TOP_K
+    hybrid = config.HYBRID_SEARCH if hybrid is None else hybrid
     name = config.collection_name(corpus, variant)
 
     try:
@@ -199,11 +249,52 @@ def search(
             f"No index called '{name}'. Run `python app.py index` first."
         ) from exc
 
-    raw = collection.query(
-        query_embeddings=embed([question]),
-        n_results=min(top_k, collection.count()),
-    )
+    total = collection.count()
 
+    # Semantic-only: unchanged from unit 1. Ask for exactly top_k.
+    if not hybrid:
+        raw = collection.query(
+            query_embeddings=embed([question]),
+            n_results=min(top_k, total),
+        )
+        return _to_results(raw)
+
+    # Hybrid: rank every chunk both ways, then fuse.
+    #
+    # Pulling the whole collection back is reasonable at this size — 75 chunks
+    # of about 175 characters. On a corpus large enough for that to hurt you
+    # would take a semantic top-N and a BM25 top-N and fuse those two shortlists
+    # instead; the fusion below does not care where the candidates came from.
+    raw = collection.query(query_embeddings=embed([question]), n_results=total)
+    candidates = _to_results(raw)
+    if not candidates:
+        return []
+
+    semantic_rank = {r.label: i + 1 for i, r in enumerate(candidates)}
+
+    from rank_bm25 import BM25Okapi
+
+    bm25 = BM25Okapi([_tokenize(r.text) for r in candidates])
+    keyword_scores = bm25.get_scores(_tokenize(question))
+    by_keyword = sorted(
+        range(len(candidates)), key=lambda i: keyword_scores[i], reverse=True
+    )
+    keyword_rank = {candidates[i].label: rank for rank, i in enumerate(by_keyword, 1)}
+
+    fused = _rrf([semantic_rank, keyword_rank], config.RRF_K)
+
+    for r in candidates:
+        r.semantic_rank = semantic_rank[r.label]
+        r.keyword_rank = keyword_rank[r.label]
+        r.fused_score = fused[r.label]
+
+    # Ties broken by semantic rank, so the order is deterministic.
+    candidates.sort(key=lambda r: (-r.fused_score, r.semantic_rank))
+    return candidates[:top_k]
+
+
+def _to_results(raw) -> list[Result]:
+    """Turn a Chroma query response into Results, nearest-first."""
     results: list[Result] = []
     for text, meta, distance in zip(
         raw["documents"][0], raw["metadatas"][0], raw["distances"][0]

@@ -62,6 +62,21 @@ TOP_K = 5               # how many chunks to pull back per question
 THRESHOLD = 0.70
 
 
+# ─── The unit 2 improvement: hybrid retrieval ────────────────────────────────
+# Semantic search alone ranked Q4's answer chunk 4th, behind two chunks that
+# answer nothing about extensions. Hybrid search adds keyword scoring (BM25)
+# alongside the vector distance and fuses the two rankings.
+#
+# Toggleable on purpose: AI201_HYBRID=0 reproduces the before-run exactly, from
+# the same code, so the before/after comparison is not a comparison against a
+# version of the repo that no longer exists.
+HYBRID_SEARCH = os.getenv("AI201_HYBRID", "1") != "0"
+
+# Reciprocal rank fusion: score = sum(1 / (RRF_K + rank)) across both rankings.
+# 60 is the value the original RRF paper uses and the usual default.
+RRF_K = int(os.getenv("AI201_RRF_K", "60"))
+
+
 # ─── Models ──────────────────────────────────────────────────────────────────
 # Embeddings run on your own machine and cost no API quota.
 # Only generation calls out to a service.
